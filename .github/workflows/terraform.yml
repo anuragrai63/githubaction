@@ -64,7 +64,7 @@ jobs:
         with:
           aws-access-key-id: '${{ secrets.TF_USER_AWS_KEY }}'
           aws-secret-access-key: '${{ secrets.TF_USER_AWS_SECRET }}'
-          aws-region: us-east-1
+          
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
@@ -73,7 +73,7 @@ jobs:
         id:   apply
                 
         run: |
-          cd githubaction/
+          
           terraform init
           terraform validate
           terraform plan 
