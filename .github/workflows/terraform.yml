@@ -62,7 +62,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: githubaction/
+        #working-directory: .
 
     steps:
     # Checkout the repository to the GitHub Actions runner
