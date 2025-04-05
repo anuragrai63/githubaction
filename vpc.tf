@@ -43,7 +43,7 @@ resource "aws_route_table" "my_rt" {
   vpc_id = aws_vpc.my_vpc.id
 
   route {
-    cidr_block = "0.0.0.0/0" # All resources in public subnet are accessible from all internet.
+    cidr_block = "0.0.0.0/0" ### All resources in public subnet are accessible from all internet.
     gateway_id = aws_internet_gateway.my_ig.id
   }
 
