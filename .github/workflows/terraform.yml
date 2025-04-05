@@ -5,11 +5,11 @@ on:
       - main
   pull_request:
 permissions:
-      id-token: write # This is required for aws oidc connection
-      contents: read # This is required for actions/checkout
-      pull-requests: write # This is required for gh bot to comment PR
-      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
-      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
+  id-token: write
+  contents: read
+  pull-requests: write
+  security-events: write
+  actions: read
 env:
   TF_LOG: INFO
   AWS_REGION: ${{ secrets.AWS_REGION }}
@@ -29,6 +29,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v1
         with:
           role-to-assume: ${{ secrets.AWS_ROLE }}
+          source-account-id: ${{ secrets.AWS_SOURCE_ACCOUNT_ID }}
           aws-region: ${{ secrets.AWS_REGION }}
           role-session-name: GitHub-OIDC-TERRAFORM
 
@@ -36,7 +37,7 @@ jobs:
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: 1.2.5
-       
+
       - name: Terraform fmt
         id: fmt
         run: terraform fmt -check
@@ -52,7 +53,7 @@ jobs:
       - name: Terraform Validate
         id: validate
         run: terraform validate -no-color
-        
+
       - uses: terraform-linters/setup-tflint@v4
         with:
           tflint_wrapper: true
@@ -69,15 +70,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const output = `#### Terraform Lint 📖\`${{ steps.tflint.outcome }}\`
-          
             
-
             <details><summary>TFLint Summary</summary>
-
+            
             \`\`\`\n
             ${process.env.PLAN}
             \`\`\`
-
+            
             </details>
             *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
             
@@ -90,31 +89,26 @@ jobs:
 
       - run: echo ${{ steps.tflint.outputs.stdout }}
       - run: echo ${{ steps.tflint.outputs.stderr }}
-      - run: echo ${{ steps.tflint.outputs.exitcode }}       
+      - run: echo ${{ steps.tflint.outputs.exitcode }}
 
       - name: Terraform Plan
         id: plan
         run: terraform plan -no-color
         if: github.event_name == 'pull_request'
-        
-        
+
       - name: Checkov GitHub Action
         uses: bridgecrewio/checkov-action@v12
         with:
-          # This will add both a CLI output to the console and create a results.sarif file
           output_format: cli,sarif
           output_file_path: console,results.sarif
         continue-on-error: true
-             
+
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3       
-        
+        uses: github/codeql-action/upload-sarif@v3
         if: success() || failure()
         with:
           sarif_file: results.sarif
-                 
-         
-        
+
       - uses: actions/github-script@v6
         if: github.event_name == 'pull_request'
         env:
@@ -126,25 +120,25 @@ jobs:
             #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
             #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
             <details><summary>Validation Output</summary>
-
+            
             \`\`\`\n
             ${{ steps.validate.outputs.stdout }}
             \`\`\`
-
+            
             </details>
-
+            
             #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
-
+            
             <details><summary>Show Plan</summary>
-
+            
             \`\`\`\n
             ${process.env.PLAN}
             \`\`\`
-
+            
             </details>
-
+            
             *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
-
+            
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
