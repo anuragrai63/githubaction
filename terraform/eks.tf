@@ -1,6 +1,4 @@
-provider "aws" {
-  region = "us-east-1"
-}
+
 
 resource "aws_vpc" "eks_vpc" {
   cidr_block           = "10.20.0.0/16"
@@ -273,3 +271,4 @@ aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
 EOF
 
   tags = { Name = "eks-mgmt-vm" }
+}
