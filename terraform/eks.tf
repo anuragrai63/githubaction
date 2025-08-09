@@ -35,7 +35,7 @@ resource "aws_iam_role_policy_attachment" "AmazonEKSServicePolicy" {
 }
 
 resource "aws_eks_cluster" "aws_eks" {
-  name     = "num-mgmt-prod-eks-cluster"
+  name     = "mgmt-eks-cluster"
   role_arn = aws_iam_role.eks_cluster.arn
   enabled_cluster_log_types = ["audit"]
   version  = 1.32
