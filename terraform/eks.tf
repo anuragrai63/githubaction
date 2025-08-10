@@ -207,8 +207,8 @@ resource "aws_launch_template" "eks_launch_template" {
     }
   }
 
-  image_id = "i-0ae66b4aab6fe2362"
-#  instance_type = var.instancetype
+  image_id = "ami-02e60ceca69eedf91" 
+
   user_data = base64encode(templatefile("eks_userdata.tftpl", {
     api_endpoint = aws_eks_cluster.aws_eks.endpoint
     certificate_authority = aws_eks_cluster.aws_eks.certificate_authority[0].data
