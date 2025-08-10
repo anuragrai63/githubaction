@@ -346,6 +346,51 @@ resource "aws_iam_role" "bastion_role" {
   }
 }
 
+
+resource "aws_iam_policy" "eks_basic_with_access_entries" {
+  name        = "EKSBasicWithAccessEntries"
+  description = "Allows EKS list/describe, Kubernetes API access, and managing EKS access entries."
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # Basic EKS discovery and K8s API access
+      {
+        Sid    = "EksListDescribeAndK8sApi"
+        Effect = "Allow"
+        Action = [
+          "eks:ListClusters",
+          "eks:DescribeCluster",
+          "eks:AccessKubernetesApi"
+        ]
+        Resource = "*" # ListClusters requires "*"; others can be cluster ARN but "*" keeps it simple
+      },
+
+      # Access entries lifecycle and policy associations
+      {
+        Sid    = "EksAccessEntriesManage"
+        Effect = "Allow"
+        Action = [
+          "eks:CreateAccessEntry",
+          "eks:DeleteAccessEntry",
+          "eks:DescribeAccessEntry",
+          "eks:ListAccessEntries",
+          "eks:AssociateAccessPolicy",
+          "eks:DisassociateAccessPolicy",
+          "eks:ListAssociatedAccessPolicies"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "bastion_basic_access" {
+  role       = aws_iam_role.bastion_role.name
+  policy_arn = aws_iam_policy.eks_basic_with_access_entries.arn
+}
+
+
 resource "aws_iam_role_policy_attachment" "bastion_ssm_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   role       = aws_iam_role.bastion_role.name
