@@ -100,7 +100,7 @@ resource "aws_security_group" "ec2_sg" {
 resource "aws_instance" "ec2_instance" {
   ami                    = data.aws_ami.amazon_linux_2.id
   instance_type          = "t3.medium"
-  subnet_id              = aws_subnet.public_subnet.id 
+  subnet_id              = aws_subnet.public_subnet_a.id
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
   associate_public_ip_address = true
