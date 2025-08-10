@@ -151,14 +151,6 @@ resource "aws_security_group" "eks_cluster" {
   description = "Security group for EKS cluster control plane"
   vpc_id      = aws_vpc.main.id
 
-  # Allow inbound HTTPS from worker nodes
-  ingress {
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.eks_nodes.id]
-  }
-
   # Allow all outbound traffic
   egress {
     from_port   = 0
@@ -186,22 +178,6 @@ resource "aws_security_group" "eks_nodes" {
     self      = true
   }
 
-  # Allow pods to communicate with the cluster API Server
-  ingress {
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.eks_cluster.id]
-  }
-
-  # Kubelet API
-  ingress {
-    from_port       = 10250
-    to_port         = 10250
-    protocol        = "tcp"
-    security_groups = [aws_security_group.eks_cluster.id]
-  }
-
   # Allow all outbound traffic
   egress {
     from_port   = 0
@@ -213,6 +189,41 @@ resource "aws_security_group" "eks_nodes" {
   tags = {
     Name = "${var.cluster_name}-node-sg"
   }
+}
+
+# Security Group Rules (separate resources to avoid circular dependency)
+
+# Allow worker nodes to communicate with cluster API Server
+resource "aws_security_group_rule" "cluster_inbound_https" {
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_nodes.id
+  security_group_id        = aws_security_group.eks_cluster.id
+  description              = "Allow worker nodes to communicate with cluster API Server"
+}
+
+# Allow pods to communicate with the cluster API Server
+resource "aws_security_group_rule" "nodes_outbound_cluster_https" {
+  type                     = "egress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_cluster.id
+  security_group_id        = aws_security_group.eks_nodes.id
+  description              = "Allow pods to communicate with the cluster API Server"
+}
+
+# Allow cluster to communicate with kubelet
+resource "aws_security_group_rule" "nodes_inbound_cluster_kubelet" {
+  type                     = "ingress"
+  from_port                = 10250
+  to_port                  = 10250
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_cluster.id
+  security_group_id        = aws_security_group.eks_nodes.id
+  description              = "Allow cluster control plane to communicate with kubelet"
 }
 
 # Bastion Security Group
@@ -432,7 +443,6 @@ resource "aws_eks_addon" "vpc_cni" {
   cluster_name             = aws_eks_cluster.main.name
   addon_name               = "vpc-cni"
   addon_version            = "v1.18.1-eksbuild.3"
-  resolve_conflicts        = "OVERWRITE"
   service_account_role_arn = null
 
   depends_on = [aws_eks_node_group.main]
@@ -446,8 +456,6 @@ resource "aws_eks_addon" "coredns" {
   cluster_name      = aws_eks_cluster.main.name
   addon_name        = "coredns"
   addon_version     = "v1.11.1-eksbuild.8"
-  resolve_conflicts = "OVERWRITE"
-
   depends_on = [aws_eks_node_group.main]
 
   tags = {
@@ -459,27 +467,20 @@ resource "aws_eks_addon" "kube_proxy" {
   cluster_name      = aws_eks_cluster.main.name
   addon_name        = "kube-proxy"
   addon_version     = "v1.31.0-eksbuild.5"
-  resolve_conflicts = "OVERWRITE"
-
   depends_on = [aws_eks_node_group.main]
 
   tags = {
     Name = "${var.cluster_name}-kube-proxy"
   }
 }
-
 resource "aws_eks_addon" "ebs_csi" {
   cluster_name             = aws_eks_cluster.main.name
   addon_name               = "aws-ebs-csi-driver"
   addon_version            = "v1.35.0-eksbuild.1"
-  resolve_conflicts        = "OVERWRITE"
   service_account_role_arn = null
 
-  depends_on = [aws_eks_node_group.main]
 
-  tags = {
-    Name = "${var.cluster_name}-ebs-csi"
-  }
+  depends_on = [aws_eks_node_group.main]
 }
 
 # 10) BASTION EC2 INSTANCE
