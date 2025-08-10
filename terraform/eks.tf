@@ -1,263 +1,134 @@
-# Variables
-variable "cluster_name" {
-  description = "Name of the EKS cluster"
-  type        = string
-  default     = "my-eks-cluster"
-}
-
-variable "region" {
-  description = "AWS region"
-  type        = string
-  default     = "us-east-1"
-}
-
-variable "availability_zones" {
-  description = "Availability zones"
-  type        = list(string)
-  default     = ["us-east-1a", "us-east-1b"]
-}
-
-# Data sources
-data "aws_caller_identity" "current" {}
-
-# 1) NETWORKING - VPC, Subnets, IGW, NAT, Routing
-
-# VPC
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
+resource aws_vpc "eks_vpc" {
+  cidr_block = "172.16.0.0/16"
+  enable_dns_support = true
   enable_dns_hostnames = true
-  enable_dns_support   = true
 
   tags = {
-    Name                                        = "${var.cluster_name}-vpc"
-    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    Name = "-eks-vpc"
+    "kubernetes.io/cluster/eks-cluster" = "shared"
   }
 }
 
-# Internet Gateway
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "${var.cluster_name}-igw"
-  }
-}
-
-# Elastic IP for NAT Gateway
-resource "aws_eip" "nat" {
-  domain = "vpc"
-  
-  tags = {
-    Name = "${var.cluster_name}-nat-eip"
-  }
-  
-  depends_on = [aws_internet_gateway.main]
-}
-
-# Public Subnets
-resource "aws_subnet" "public" {
-  count = 2
-
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.${count.index * 16}.0/20"
-  availability_zone       = var.availability_zones[count.index]
+resource "aws_subnet" "eks_subnet-a" {
+  vpc_id = aws_vpc.eks_vpc.id
+  cidr_block = "172.16.10.0/24"
+  availability_zone = "us-east-1a"  
   map_public_ip_on_launch = true
-
   tags = {
-    Name                                        = "${var.cluster_name}-public-subnet-${count.index + 1}"
-    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
-    "kubernetes.io/role/elb"                    = "1"
-    Type                                        = "Public"
-  }
-}
-
-# Private Subnets
-resource "aws_subnet" "private" {
-  count = 2
-
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.${(count.index + 2) * 16}.0/20"
-  availability_zone = var.availability_zones[count.index]
-
-  tags = {
-    Name                                        = "${var.cluster_name}-private-subnet-${count.index + 1}"
-    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
-    "kubernetes.io/role/internal-elb"           = "1"
-    Type                                        = "Private"
-  }
-}
-
-# NAT Gateway (in first public subnet)
-resource "aws_nat_gateway" "main" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[0].id
-
-  tags = {
-    Name = "${var.cluster_name}-nat-gateway"
+    Name = "pub-eks-subnet-a"
+    "kubernetes.io/cluster/eks-cluster" = "shared"
+    "kubernetes.io/role/elb"   = "1"
+      Type                     = "Public"
+    }
   }
 
-  depends_on = [aws_internet_gateway.main]
+  resource "aws_subnet" "eks_subnet-b" {
+  vpc_id = aws_vpc.eks_vpc.id
+  cidr_block = "172.16.20.0/24"
+  availability_zone = "us-east-1b"  
+  map_public_ip_on_launch = true
+  tags = {
+    Name = "pub-eks-subnet-b"
+    "kubernetes.io/cluster/eks-cluster" = "shared"
+    "kubernetes.io/role/elb"  = "1"
+      Type     = "Public"
+    }
+  }
+
+resource "aws_subnet" "eks_subnet-priv-a" {
+  vpc_id = aws_vpc.eks_vpc.id
+  cidr_block = "172.16.30.0/24"
+  availability_zone = "us-east-1a"  
+  map_public_ip_on_launch = true
+  tags = {
+    Name = "priv-eks-subnet-a"
+    "kubernetes.io/cluster/eks-cluster" = "shared"
+    "kubernetes.io/role/elb"   = "1"
+      Type                     = "Private"
+    }
+  }
+
+  resource "aws_subnet" "eks_subnet-priv-b" {
+  vpc_id = aws_vpc.eks_vpc.id
+  cidr_block = "172.16.40.0/24"
+  availability_zone = "us-east-1b"  
+  map_public_ip_on_launch = true
+  tags = {
+    Name = "priv-eks-subnet-b"
+    "kubernetes.io/cluster/eks-cluster" = "shared"
+    "kubernetes.io/role/elb"  = "1"
+      Type     = "Private"
+    }
+  }
+
+resource "aws_internet_gateway" "igw" {
+  vpc_id = aws_vpc.eks_vpc.id
+
+  tags = {
+    Name = "eks-igw"
+  } 
 }
 
-# Public Route Table
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
+resource "aws_route_table" "public_rt" {
+  vpc_id = aws_vpc.eks_vpc.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main.id
+    gateway_id = aws_internet_gateway.igw.id
   }
-
   tags = {
-    Name = "${var.cluster_name}-public-rt"
+    Name = "eks-public-rt"
   }
 }
 
-# Private Route Table
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.main.id
+resource "aws_route_table_association" "public_rt_assoc_a" {
+  subnet_id      = aws_subnet.eks_subnet-a.id
+  route_table_id = aws_route_table.public_rt.id
+}
+resource "aws_route_table_association" "public_rt_assoc_b" {
+  subnet_id      = aws_subnet.eks_subnet-b.id
+  route_table_id = aws_route_table.public_rt.id
+}
+
+resource "aws_nat_gateway" "nat-gateway_id" {
+  allocation_id = aws_eip.nat_eip.id
+  subnet_id     = aws_subnet.eks_subnet-a.id
+
+  tags = {
+    Name = "eks-nat-gateway"
+  }   
+  
+}
+resource "aws_eip" "nat_eip" {
+
+  tags = {
+    Name = "eks-nat-eip"
+  }
+}
+
+resource "aws_route_table" "private_rt" {
+  vpc_id = aws_vpc.eks_vpc.id
 
   route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main.id
+    cidr_block = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.nat-gateway_id.id
   }
-
   tags = {
-    Name = "${var.cluster_name}-private-rt"
+    Name = "eks-private-rt"
   }
 }
 
-# Route Table Associations - Public
-resource "aws_route_table_association" "public" {
-  count = 2
-
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
+resource "aws_route_table_association" "private_rt_assoc_a" {
+  subnet_id      = aws_subnet.eks_subnet-priv-a.id
+  route_table_id = aws_route_table.private_rt.id
+}
+resource "aws_route_table_association" "private_rt_assoc_b" {
+  subnet_id      = aws_subnet.eks_subnet-priv-b.id
+  route_table_id = aws_route_table.private_rt.id
 }
 
-# Route Table Associations - Private
-resource "aws_route_table_association" "private" {
-  count = 2
-
-  subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private.id
-}
-
-# 2) SECURITY GROUPS
-
-# EKS Cluster Security Group
-resource "aws_security_group" "eks_cluster" {
-  name        = "${var.cluster_name}-cluster-sg"
-  description = "Security group for EKS cluster control plane"
-  vpc_id      = aws_vpc.main.id
-
-  # Allow all outbound traffic
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${var.cluster_name}-cluster-sg"
-  }
-}
-
-# EKS Node Security Group
-resource "aws_security_group" "eks_nodes" {
-  name        = "${var.cluster_name}-node-sg"
-  description = "Security group for EKS worker nodes"
-  vpc_id      = aws_vpc.main.id
-
-  # Allow nodes to communicate with each other
-  ingress {
-    from_port = 0
-    to_port   = 65535
-    protocol  = "tcp"
-    self      = true
-  }
-
-  # Allow all outbound traffic
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${var.cluster_name}-node-sg"
-  }
-}
-
-# Security Group Rules (separate resources to avoid circular dependency)
-
-# Allow worker nodes to communicate with cluster API Server
-resource "aws_security_group_rule" "cluster_inbound_https" {
-  type                     = "ingress"
-  from_port                = 443
-  to_port                  = 443
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.eks_nodes.id
-  security_group_id        = aws_security_group.eks_cluster.id
-  description              = "Allow worker nodes to communicate with cluster API Server"
-}
-
-# Allow pods to communicate with the cluster API Server
-resource "aws_security_group_rule" "nodes_outbound_cluster_https" {
-  type                     = "egress"
-  from_port                = 443
-  to_port                  = 443
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.eks_cluster.id
-  security_group_id        = aws_security_group.eks_nodes.id
-  description              = "Allow pods to communicate with the cluster API Server"
-}
-
-# Allow cluster to communicate with kubelet
-resource "aws_security_group_rule" "nodes_inbound_cluster_kubelet" {
-  type                     = "ingress"
-  from_port                = 10250
-  to_port                  = 10250
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.eks_cluster.id
-  security_group_id        = aws_security_group.eks_nodes.id
-  description              = "Allow cluster control plane to communicate with kubelet"
-}
-
-# Bastion Security Group
-resource "aws_security_group" "bastion" {
-  name        = "${var.cluster_name}-bastion-sg"
-  description = "Security group for bastion host"
-  vpc_id      = aws_vpc.main.id
-
-  # SSH access (optional - you can remove if using only SSM)
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # Restrict this to your IP for better security
-  }
-
-  # Allow all outbound traffic
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${var.cluster_name}-bastion-sg"
-  }
-}
-
-# 3) IAM ROLES AND POLICIES ###
-
-# EKS Cluster IAM Role
 resource "aws_iam_role" "eks_cluster_role" {
-  name = "${var.cluster_name}-cluster-role"
+  name = "eks-cluster-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -273,262 +144,145 @@ resource "aws_iam_role" "eks_cluster_role" {
   })
 
   tags = {
-    Name = "${var.cluster_name}-cluster-role"
-  }
+    Name = "eks-cluster-role"
+  }     
+  
 }
 
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
   role       = aws_iam_role.eks_cluster_role.name
-}
-
-# EKS Node Group IAM Role
-resource "aws_iam_role" "eks_node_group_role" {
-  name = "${var.cluster_name}-node-group-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name = "${var.cluster_name}-node-group-role"
-  }
-}
-
-resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-  role       = aws_iam_role.eks_node_group_role.name
-}
-
-resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  role       = aws_iam_role.eks_node_group_role.name
-}
-
-resource "aws_iam_role_policy_attachment" "eks_container_registry_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-  role       = aws_iam_role.eks_node_group_role.name
-}
-
-resource "aws_iam_role_policy_attachment" "eks_ssm_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-  role       = aws_iam_role.eks_node_group_role.name
-}
-
-# Bastion IAM Role
-resource "aws_iam_role" "bastion_role" {
-  name = "${var.cluster_name}-bastion-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name = "${var.cluster_name}-bastion-role"
-  }
-}
-
-
-resource "aws_iam_policy" "eks_basic_with_access_entries" {
-  name        = "EKSBasicWithAccessEntries"
-  description = "Allows EKS list/describe, Kubernetes API access, and managing EKS access entries."
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      # Basic EKS discovery and K8s API access
-      {
-        Sid    = "EksListDescribeAndK8sApi"
-        Effect = "Allow"
-        Action = [
-          "eks:ListClusters",
-          "eks:DescribeCluster",
-          "eks:AccessKubernetesApi"
-        ]
-        Resource = "*" # ListClusters requires "*"; others can be cluster ARN but "*" keeps it simple
-      },
-
-      # Access entries lifecycle and policy associations
-      {
-        Sid    = "EksAccessEntriesManage"
-        Effect = "Allow"
-        Action = [
-          "eks:CreateAccessEntry",
-          "eks:DeleteAccessEntry",
-          "eks:DescribeAccessEntry",
-          "eks:ListAccessEntries",
-          "eks:AssociateAccessPolicy",
-          "eks:DisassociateAccessPolicy",
-          "eks:ListAssociatedAccessPolicies"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "bastion_basic_access" {
-  role       = aws_iam_role.bastion_role.name
-  policy_arn = aws_iam_policy.eks_basic_with_access_entries.arn
-}
-
-
-resource "aws_iam_role_policy_attachment" "bastion_ssm_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-  role       = aws_iam_role.bastion_role.name
-}
-
-resource "aws_iam_role_policy_attachment" "bastion_eks_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-  role       = aws_iam_role.bastion_role.name
+}
+resource "aws_iam_role_policy_attachment" "eks_vpc_resource_controller_policy" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_VPCResourceController"
+}
+resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+resource "aws_iam_role_policy_attachment" "eks_node_policy" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+resource "aws_iam_role_policy_attachment" "ssm_policy" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_role_policy_attachment" "bastion_ecr_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess"
-  role       = aws_iam_role.bastion_role.name
-}
-
-# Instance Profile for Bastion
-resource "aws_iam_instance_profile" "bastion_profile" {
-  name = "${var.cluster_name}-bastion-profile"
-  role = aws_iam_role.bastion_role.name
-}
-
-# 4) OIDC PROVIDER FOR IRSA
-data "tls_certificate" "eks" {
-  url = aws_eks_cluster.main.identity[0].oidc[0].issuer
-}
-
-resource "aws_iam_openid_connect_provider" "eks" {
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
-  url             = aws_eks_cluster.main.identity[0].oidc[0].issuer
-
-  tags = {
-    Name = "${var.cluster_name}-oidc-provider"
-  }
-}
-
-# 5) EKS CLUSTER
-resource "aws_eks_cluster" "main" {
-  name     = var.cluster_name
+resource "aws_eks_cluster" "eks-cluster" {
+  name     = "eks-cluster"
   role_arn = aws_iam_role.eks_cluster_role.arn
-  version  = "1.31"
+  version = 1.32
 
   vpc_config {
-    subnet_ids              = concat(aws_subnet.private[*].id, aws_subnet.public[*].id)
+    subnet_ids = [
+      aws_subnet.eks_subnet-a.id,
+      aws_subnet.eks_subnet-b.id,
+      aws_subnet.eks_subnet-priv-a.id,
+      aws_subnet.eks_subnet-priv-b.id
+    ]
+    endpoint_public_access = true
     endpoint_private_access = true
-    endpoint_public_access  = true
-    security_group_ids      = [aws_security_group.eks_cluster.id]
   }
-
-  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_cluster_policy,
+    aws_iam_role_policy_attachment.eks_vpc_resource_controller_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy,
+    aws_iam_role_policy_attachment.eks_node_policy,
+    aws_iam_role_policy_attachment.ssm_policy
   ]
 
   tags = {
-    Name = var.cluster_name
+    Name = "eks-cluster"
   }
+  
 }
 
-# 6) MANAGED NODE GROUP
-resource "aws_eks_node_group" "main" {
-  cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "${var.cluster_name}-nodes"
-  node_role_arn   = aws_iam_role.eks_node_group_role.arn
-  subnet_ids      = aws_subnet.private[*].id
-  instance_types  = ["t3.medium"]
-  ami_type        = "AL2_x86_64"
-  capacity_type   = "ON_DEMAND"
-
+resource "aws_eks_node_group" "eks_node_group" {
+  cluster_name    = aws_eks_cluster.eks-cluster.name
+  node_group_name = "eks-node-group"
+  node_role_arn   = aws_iam_role.eks_cluster_role.arn
+  subnet_ids      = [
+    aws_subnet.eks_subnet-priv-a.id,
+    aws_subnet.eks_subnet-priv-b.id
+  ]
   scaling_config {
     desired_size = 2
-    max_size     = 4
+    max_size     = 3
     min_size     = 1
   }
-
-  update_config {
-    max_unavailable = 1
-  }
-
-  # Ensure that IAM Role permissions are created before and deleted after EKS Node Group handling.
-  depends_on = [
-    aws_iam_role_policy_attachment.eks_worker_node_policy,
-    aws_iam_role_policy_attachment.eks_cni_policy,
-    aws_iam_role_policy_attachment.eks_container_registry_policy,
-  ]
+  
+  instance_types = ["t3.medium"]
 
   tags = {
-    Name = "${var.cluster_name}-node-group"
+    Name = "eks-node-group"
   }
+  
 }
 
-# 8) EKS ADD-ONS
 resource "aws_eks_addon" "vpc_cni" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "vpc-cni"
-  addon_version            = "v1.18.1-eksbuild.3"
-  service_account_role_arn = null
-
-  depends_on = [aws_eks_node_group.main]
+  cluster_name = aws_eks_cluster.eks-cluster.name
+  addon_name   = "vpc-cni"
 
   tags = {
-    Name = "${var.cluster_name}-vpc-cni"
+    Name = "eks-vpc-cni-addon"
   }
+  
 }
 
 resource "aws_eks_addon" "coredns" {
-  cluster_name      = aws_eks_cluster.main.name
-  addon_name        = "coredns"
-  addon_version     = "v1.11.1-eksbuild.8"
-  depends_on = [aws_eks_node_group.main]
+  cluster_name = aws_eks_cluster.eks-cluster.name
+  addon_name   = "coredns"
 
   tags = {
-    Name = "${var.cluster_name}-coredns"
+    Name = "eks-coredns-addon"
   }
+  
 }
 
 resource "aws_eks_addon" "kube_proxy" {
-  cluster_name      = aws_eks_cluster.main.name
-  addon_name        = "kube-proxy"
-  addon_version     = "v1.31.0-eksbuild.5"
-  depends_on = [aws_eks_node_group.main]
+  cluster_name = aws_eks_cluster.eks-cluster.name
+  addon_name   = "kube-proxy"
 
   tags = {
-    Name = "${var.cluster_name}-kube-proxy"
+    Name = "eks-kube-proxy-addon"
   }
-}
-resource "aws_eks_addon" "ebs_csi" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "aws-ebs-csi-driver"
-  addon_version            = "v1.35.0-eksbuild.1"
-  service_account_role_arn = null
-
-
-  depends_on = [aws_eks_node_group.main]
+  
 }
 
-# 10) BASTION EC2 INSTANCE
+
+  
+resource "aws_iam_role" "bastion_role" {
+  name = "eks-bastion-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "eks-bastion-role"
+  }     
+  
+}
+
+resource "aws_iam_policy_attachment" "full_access" {
+  name       = "eks-bastion-full-access"
+  roles      = [aws_iam_role.bastion_role.name]
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+  
+}
+
 data "aws_ami" "amazon_linux" {
   most_recent = true
   owners      = ["amazon"]
@@ -538,117 +292,47 @@ data "aws_ami" "amazon_linux" {
     values = ["amzn2-ami-hvm-*-x86_64-gp2"]
   }
 }
-
-resource "aws_instance" "bastion" {
-  ami                    = data.aws_ami.amazon_linux.id
-  instance_type          = "t3.micro"
-  key_name               = null  # Set your key pair name if you want SSH access
-  vpc_security_group_ids = [aws_security_group.bastion.id]
-  subnet_id              = aws_subnet.public[0].id
-  iam_instance_profile   = aws_iam_instance_profile.bastion_profile.name
-
-  user_data = base64encode(templatefile("${path.module}/bastion_userdata.sh", {
-    cluster_name = var.cluster_name
-    region       = var.region
-  }))
+resource "aws_instance" "bastion_host" {
+  ami           = data.aws_ami.amazon_linux.id
+  instance_type = "t3.micro"
+  subnet_id     = aws_subnet.eks_subnet-a.id
+  iam_instance_profile = aws_iam_role.bastion_role.name
 
   tags = {
-    Name = "${var.cluster_name}-bastion"
-  }
-}
-
-# 11) ECR REPOSITORY (Optional)
-resource "aws_ecr_repository" "app_repo" {
-  name                 = "${var.cluster_name}-app"
-  image_tag_mutability = "MUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
+    Name = "eks-bastion-host"
   }
 
-  tags = {
-    Name = "${var.cluster_name}-ecr-repo"
+  user_data = <<-EOF
+              #!/bin/bash
+              yum update -y
+              yum install -y aws-cli
+              curl -LO https://s3.us-west-2.amazonaws.com/amazon-eks/1.32.3/2025-04-17/bin/linux/amd64/kubectl
+              chmod +x ./kubectl
+              mv ./kubectl /usr/local/bin/kubectl
+              yum install -y amazon-ssm-agent
+              systemctl start amazon-ssm-agent
+              systemctl enable amazon-ssm-agent
+              aws eks update-kubeconfig --region us-east-1 --name eks-cluster
+              EOF
+
+  depends_on = [aws_eks_cluster.eks-cluster]
+}
+
+resource "aws_security_group" "bastion_sg" {
+  name        = "eks-bastion-sg"
+  description = "Security group for EKS bastion host"
+  vpc_id      = aws_vpc.eks_vpc.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] 
   }
-}
-
-# OUTPUTS
-output "cluster_name" {
-  description = "EKS cluster name"
-  value       = aws_eks_cluster.main.name
-}
-
-output "cluster_endpoint" {
-  description = "EKS cluster endpoint"
-  value       = aws_eks_cluster.main.endpoint
-}
-
-output "cluster_security_group_id" {
-  description = "Security group ID attached to the EKS cluster"
-  value       = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
-}
-
-output "cluster_arn" {
-  description = "EKS cluster ARN"
-  value       = aws_eks_cluster.main.arn
-}
-
-output "cluster_certificate_authority_data" {
-  description = "Base64 encoded certificate data required to communicate with the cluster"
-  value       = aws_eks_cluster.main.certificate_authority[0].data
-}
-
-output "cluster_oidc_issuer_url" {
-  description = "The URL on the EKS cluster OIDC Issuer"
-  value       = aws_eks_cluster.main.identity[0].oidc[0].issuer
-}
-
-output "node_group_arn" {
-  description = "EKS node group ARN"
-  value       = aws_eks_node_group.main.arn
-}
-
-output "bastion_instance_id" {
-  description = "Bastion instance ID"
-  value       = aws_instance.bastion.id
-}
-
-output "bastion_public_ip" {
-  description = "Bastion public IP"
-  value       = aws_instance.bastion.public_ip
-}
-
-output "ecr_repository_url" {
-  description = "ECR repository URL"
-  value       = aws_ecr_repository.app_repo.repository_url
-}
-
-output "vpc_id" {
-  description = "VPC ID"
-  value       = aws_vpc.main.id
-}
-
-output "private_subnet_ids" {
-  description = "Private subnet IDs"
-  value       = aws_subnet.private[*].id
-}
-
-output "public_subnet_ids" {
-  description = "Public subnet IDs"
-  value       = aws_subnet.public[*].id
-}
-
-# Role ARNs for reference
-output "cluster_role_arn" {
-  description = "EKS cluster IAM role ARN"
-  value       = aws_iam_role.eks_cluster_role.arn
-}
-
-output "node_role_arn" {
-  description = "EKS node group IAM role ARN"
-  value       = aws_iam_role.eks_node_group_role.arn
-}
-
-output "bastion_role_arn" {
-  description = "Bastion IAM role ARN"
-  value       = aws_iam_role.bastion_role.arn
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
