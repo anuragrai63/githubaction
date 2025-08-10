@@ -253,7 +253,7 @@ resource "aws_security_group" "bastion" {
   }
 }
 
-# 3) IAM ROLES AND POLICIES
+# 3) IAM ROLES AND POLICIES ###
 
 # EKS Cluster IAM Role
 resource "aws_iam_role" "eks_cluster_role" {
