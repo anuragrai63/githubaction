@@ -315,7 +315,7 @@ resource "aws_instance" "bastion_host" {
               aws eks update-kubeconfig --region us-east-1 --name eks-cluster
               EOF
 
-  depends_on = [aws_iam_role_policy_attachment.full_access, aws_eks_cluster.eks-cluster]
+  depends_on = [aws_eks_cluster.eks-cluster]
 }
 
 resource "aws_security_group" "bastion_sg" {
