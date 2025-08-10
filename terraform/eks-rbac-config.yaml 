@@ -1,0 +1,106 @@
+# eks-rbac-config.yaml
+# This file configures RBAC access for your bastion host and manages the aws-auth ConfigMap
+# Apply this after your cluster is created
+
+# First, you'll need to update the aws-auth ConfigMap to include your bastion role
+# You can do this by running the following commands from your bastion or local machine:
+
+# kubectl get configmap aws-auth -n kube-system -o yaml > aws-auth-configmap.yaml
+
+# Then modify the aws-auth-configmap.yaml to include your bastion role:
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-auth
+  namespace: kube-system
+data:
+  mapRoles: |
+    - rolearn: YOUR_NODE_ROLE_ARN_HERE
+      username: system:node:{{EC2PrivateDNSName}}
+      groups:
+        - system:bootstrappers
+        - system:nodes
+    - rolearn: YOUR_BASTION_ROLE_ARN_HERE
+      username: bastion-user
+      groups:
+        - system:masters
+  mapUsers: |
+    - userarn: arn:aws:iam::YOUR_ACCOUNT_ID:user/YOUR_USERNAME
+      username: YOUR_USERNAME
+      groups:
+        - system:masters
+
+---
+# ClusterRole for bastion access (if you don't want full admin access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bastion-cluster-role
+rules:
+- apiGroups: [""]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["apps"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["extensions"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["*"]
+  verbs: ["*"]
+
+---
+# ClusterRoleBinding for bastion user
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bastion-cluster-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bastion-cluster-role
+subjects:
+- kind: User
+  name: bastion-user
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Service Account for applications (optional)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-service-account
+  namespace: default
+
+---
+# ClusterRole for application service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: app-cluster-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+# ClusterRoleBinding for application service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: app-cluster-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: app-cluster-role
+subjects:
+- kind: ServiceAccount
+  name: app-service-account
+  namespace: default
