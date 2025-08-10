@@ -136,3 +136,13 @@ resource "aws_instance" "ec2_instance" {
     Name = "ec2-eks-ssm-s3-ec2-fullaccess"
   }
 }
+
+data "aws_ami" "amazon_linux_2" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+}
