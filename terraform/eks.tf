@@ -5,16 +5,7 @@ resource "aws_eks_cluster" "my-eks-demo" {
   }
 
   bootstrap_self_managed_addons = "false"
-
-  kubernetes_network_config {
-    elastic_load_balancing {
-      enabled = "false"
-    }
-
-    ip_family         = "ipv4"
-    service_ipv4_cidr = "10.100.0.0/16"
-  }
-
+  
   name     = "my-eks-demo"
   role_arn = aws_iam_role.eks_cluster_role.arn
 
@@ -26,14 +17,11 @@ resource "aws_eks_cluster" "my-eks-demo" {
 
   vpc_config {
     endpoint_private_access = "true"
-    endpoint_public_access  = "true"
-    public_access_cidrs     = ["0.0.0.0/0"]
+    endpoint_public_access  = "true"  
     subnet_ids              = ["${aws_subnet.eks_pr_a.id}", "${aws_subnet.eks_pr_b.id}"]
   }
 
-  zonal_shift_config {
-    enabled = "false"
-  }
+  
 }
 
 
