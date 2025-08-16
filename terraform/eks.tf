@@ -54,11 +54,7 @@ resource "aws_eks_node_group" "my-eks-ng" {
   }
 
   version = "1.32"
-  timeouts {
-    create = "15m"
-    delete = "15m"
-    update = "15m"
-  }
+  depends_on = [ aws_eks_cluster.my-eks-demo, aws_iam_role.eks_node_role] 
 }
 
 resource "aws_eks_addon" "vpc_cni" {
