@@ -49,7 +49,6 @@ resource "aws_subnet" "eks_pb_b" {
 resource "aws_subnet" "eks_pr_a" {
   cidr_block                                     = "172.16.30.0/24"
   vpc_id                                         = aws_vpc.eks_vpc.id
-  map_public_ip_on_launch                        = "true"
   availability_zone                              = "us-east-1a"
 
   tags = {
@@ -61,7 +60,6 @@ resource "aws_subnet" "eks_pr_a" {
 resource "aws_subnet" "eks_pr_b" {
   cidr_block                                     = "172.16.40.0/24"
   vpc_id                                         = aws_vpc.eks_vpc.id
-  map_public_ip_on_launch                        = "true"
   availability_zone                              = "us-east-1b"
 
   tags = {
