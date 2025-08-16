@@ -21,16 +21,6 @@ resource "aws_eks_cluster" "this" {
   tags = { Name = var.cluster_name }
 }
 
-# EKS OIDC provider (for IRSA)
-data "aws_eks_cluster" "this" { name = aws_eks_cluster.this.name }
-
-data "aws_eks_cluster_auth" "this" { name = aws_eks_cluster.this.name }
-
-resource "aws_iam_openid_connect_provider" "eks" {
-  url             = data.aws_eks_cluster.this.identity[0].oidc[0].issuer
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.aws_eks_cluster.this.identity[0].oidc[0].thumbprint]
-}
 
 resource "aws_eks_node_group" "this" {
   cluster_name    = aws_eks_cluster.this.name
