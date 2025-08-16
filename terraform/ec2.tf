@@ -13,9 +13,6 @@ resource "aws_instance" "my-eks-mgmt" {
     volume_size           = "8"
     volume_type           = "gp3"
   }
-    user_data = templatefile("bastion_userdata.sh", {
-        cluster = "my-eks-demo"
-    })
   subnet_id         = "${aws_subnet.eks_pb_b.id}"
   depends_on = [ aws_eks_cluster.my-eks-demo ]
 
