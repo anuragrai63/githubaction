@@ -1,128 +1,79 @@
-resource "aws_eks_cluster" "my-eks-demo" {
-  access_config {
-    authentication_mode                         = "API_AND_CONFIG_MAP"
-    bootstrap_cluster_creator_admin_permissions = "true"
-  }
-
-  bootstrap_self_managed_addons = "false"
-  
-  name     = "my-eks-demo"
-  role_arn = aws_iam_role.eks_cluster_role.arn
-
-  upgrade_policy {
-    support_type = "STANDARD"
-  }
-
-  version = "1.32"
+resource "aws_eks_cluster" "this" {
+  name     = var.cluster_name
+  role_arn = aws_iam_role.eks_cluster.arn
+  version  = var.kubernetes_version
 
   vpc_config {
-    endpoint_private_access = "true"
-    endpoint_public_access  = "true"  
-    subnet_ids              = ["${aws_subnet.eks_pr_a.id}", "${aws_subnet.eks_pr_b.id}"]
+    subnet_ids              = concat([for s in aws_subnet.public  : s.id], [for s in aws_subnet.private : s.id])
+    endpoint_public_access  = true
+    endpoint_private_access = true
+    security_group_ids      = [aws_security_group.eks_cluster.id]
   }
 
-  depends_on = [ aws_iam_role.eks_cluster_role]
+  access_config {
+    authentication_mode = "API_AND_CONFIG_MAP"
+  }
 
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster_policy
+  ]
+
+  tags = { Name = var.cluster_name }
 }
 
 
-resource "aws_eks_node_group" "my-eks-ng" {
-  ami_type        = "AL2023_x86_64_STANDARD"
-  capacity_type   = "ON_DEMAND"
-  cluster_name    = "${aws_eks_cluster.my-eks-demo.name}"
-  disk_size       = "20"
-  instance_types  = ["t3.medium"]
-  node_group_name = "my-eks-ng"
-
-  node_repair_config {
-    enabled = "false"
-  }
-
-  node_role_arn   = aws_iam_role.eks_node_role.arn
-  release_version = "1.32.7-20250807"
+resource "aws_eks_node_group" "this" {
+  cluster_name    = aws_eks_cluster.this.name
+  node_group_name = "primary"
+  node_role_arn   = aws_iam_role.eks_node.arn
+  subnet_ids      = [for s in aws_subnet.private : s.id]
+  version         = var.kubernetes_version
 
   scaling_config {
-    desired_size = "2"
-    max_size     = "2"
-    min_size     = "2"
+    desired_size = var.node_desired_size
+    min_size     = var.node_min_size
+    max_size     = var.node_max_size
   }
 
-  subnet_ids = ["${aws_subnet.eks_pr_a.id}", "${aws_subnet.eks_pr_b.id}"]
+  capacity_type  = "ON_DEMAND"
+  instance_types = [var.node_instance_type]
+
+  remote_access { # not opening SSH; left unset
+  }
 
   update_config {
-    max_unavailable = "1"
+    max_unavailable = 1
   }
 
-  version = "1.32"
-  depends_on = [ aws_eks_cluster.my-eks-demo, aws_iam_role.eks_node_role] 
+  
 }
 
+
+
+###############################################
+# addons.tf (EKS Managed Add-ons)
+###############################################
 resource "aws_eks_addon" "vpc_cni" {
-  cluster_name = aws_eks_cluster.my-eks-demo.name
-  addon_name   = "vpc-cni"
-  addon_version = "v1.15.1-eksbuild.1"
-  depends_on = [ aws_eks_node_group.my-eks-ng ]
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "vpc-cni"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
 }
 
 resource "aws_eks_addon" "kube_proxy" {
-  cluster_name = aws_eks_cluster.my-eks-demo.name
+  cluster_name = aws_eks_cluster.this.name
   addon_name   = "kube-proxy"
-  addon_version      = "v1.32.1-eksbuild.1"
-  depends_on = [ aws_eks_node_group.my-eks-ng ]
 }
 
 resource "aws_eks_addon" "coredns" {
-  cluster_name = aws_eks_cluster.my-eks-demo.name
+  cluster_name = aws_eks_cluster.this.name
   addon_name   = "coredns"
-  addon_version      = "v1.11.1-eksbuild.4"
-  depends_on = [ aws_eks_node_group.my-eks-ng ]
-}
-
-resource "aws_eks_addon" "ebs_csi" {
-  cluster_name = aws_eks_cluster.my-eks-demo.name
-  addon_name   = "aws-ebs-csi-driver"
-  addon_version      = "v1.26.1-eksbuild.1"
-  depends_on = [ aws_eks_node_group.my-eks-ng ]
-}
-
-resource "aws_eks_addon" "efs_csi" {
-  cluster_name = aws_eks_cluster.my-eks-demo.name
-  addon_name   = "aws-efs-csi-driver"
-  addon_version      = "v1.7.1-eksbuild.1"
-  depends_on = [ aws_eks_node_group.my-eks-ng ]
-}
-
-resource "aws_eks_addon" "container_insights" {
-  cluster_name = aws_eks_cluster.my-eks-demo.name
-  addon_name   = "amazon-cloudwatch-observability"
-  addon_version      = "v1.1.1-eksbuild.1"
-  depends_on = [ aws_eks_node_group.my-eks-ng ]
 }
 
 
-resource "aws_security_group" "eks_cluster_sg" {
-  name        = "eks-cluster-sg"
-  description = "EKS Cluster Security Group"
-  vpc_id      = aws_vpc.eks_vpc.id
-
-  ingress {
-    description = "Allow Kubernetes API from VPC"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = [aws_vpc.eks_vpc.cidr_block] 
-  }
 
 
-  egress {
-    description = "Allow all outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
-  tags = {
-    Name = "eks-cluster-sg"
-  }
-}
+
+
+

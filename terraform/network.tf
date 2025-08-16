@@ -1,172 +1,157 @@
-resource "aws_vpc" "eks_vpc" {
-  cidr_block                           = "172.16.0.0/16"
-  enable_dns_hostnames                 = "true"
-  enable_dns_support                   = "true"
-  
-  tags = {
-    Name = "my-vpc-eks"
-  }
-
-}
-
-resource "aws_subnet" "eks_pb_a" {
-  cidr_block                                     = "172.16.10.0/24"
-  vpc_id                                         = aws_vpc.eks_vpc.id
-  map_public_ip_on_launch                        = "true"
-  availability_zone                              = "us-east-1a"
+resource "aws_vpc" "this" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_support   = true
+  enable_dns_hostnames = true
 
   tags = {
-    Name = "pub-eks-subnet-a"
-  }
-
-    tags_all = {
-        Name = "pub-eks-subnet-a"
-        "kubernetes.io/cluster/eks-cluster" = "shared"
-        "kubernetes.io/role/elb"   = "1"
-        Type                     = "Public"
-    }
-}
-
-resource "aws_subnet" "eks_pb_b" {
-  cidr_block                                     = "172.16.20.0/24"
-  vpc_id                                         = aws_vpc.eks_vpc.id
-  map_public_ip_on_launch                        = "true"
-  availability_zone                              = "us-east-1b"
-
-  tags = {
-    Name = "pub-eks-subnet-b"
-  }
-
-    tags_all = {
-        Name = "pub-eks-subnet-b"
-        "kubernetes.io/cluster/eks-cluster" = "shared"
-        "kubernetes.io/role/elb"   = "1"
-        Type                     = "Public"
-    }
-}
-
-
-resource "aws_subnet" "eks_pr_a" {
-  cidr_block                                     = "172.16.30.0/24"
-  vpc_id                                         = aws_vpc.eks_vpc.id
-  availability_zone                              = "us-east-1a"
-
-  tags = {
-    Name = "pr-eks-subnet-a"
-  }
-
-}
-
-resource "aws_subnet" "eks_pr_b" {
-  cidr_block                                     = "172.16.40.0/24"
-  vpc_id                                         = aws_vpc.eks_vpc.id
-  availability_zone                              = "us-east-1b"
-
-  tags = {
-    Name = "pr-eks-subnet-b"
+    Name = "${var.cluster_name}-vpc"
   }
 }
 
-# Internet Gateway
-resource "aws_internet_gateway" "eks_igw" {
-    vpc_id = aws_vpc.eks_vpc.id
-
-    tags = {
-        Name = "eks-igw"
-    }
+resource "aws_internet_gateway" "this" {
+  vpc_id = aws_vpc.this.id
+  tags = { Name = "${var.cluster_name}-igw" }
 }
 
-# Elastic IPs for NAT Gateways
-resource "aws_eip" "nat_a" {
-    domain = "vpc"
-    tags = {
-        Name = "nat-a"
-    }
+# Public subnets (2)
+resource "aws_subnet" "public" {
+  for_each = { for idx, az in local.azs : idx => az }
+
+  vpc_id                  = aws_vpc.this.id
+  availability_zone       = each.value
+  cidr_block              = cidrsubnet(var.vpc_cidr, 8, each.key)           # 10.0.0.0/24, 10.0.1.0/24
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name                                     = "${var.cluster_name}-public-${each.value}"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "kubernetes.io/role/elb"                  = 1
+  }
 }
 
-resource "aws_eip" "nat_b" {
-    domain = "vpc"
-    tags = {
-        Name = "nat-b"
-    }
+# Private subnets (2)
+resource "aws_subnet" "private" {
+  for_each = { for idx, az in local.azs : idx => az }
+
+  vpc_id            = aws_vpc.this.id
+  availability_zone = each.value
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, each.key + 10)            # 10.0.10.0/24, 10.0.11.0/24
+
+  tags = {
+    Name                                         = "${var.cluster_name}-private-${each.value}"
+    "kubernetes.io/cluster/${var.cluster_name}"   = "shared"
+    "kubernetes.io/role/internal-elb"             = 1
+  }
 }
 
-# NAT Gateways
-resource "aws_nat_gateway" "nat_gw_a" {
-    allocation_id = aws_eip.nat_a.id
-    subnet_id     = aws_subnet.eks_pb_a.id
-
-    tags = {
-        Name = "nat-gw-a"
-    }
+# NAT per AZ
+resource "aws_eip" "nat" {
+  for_each = aws_subnet.public
+  domain   = "vpc"
+  tags     = { Name = "${var.cluster_name}-nat-eip-${each.key}" }
 }
 
-resource "aws_nat_gateway" "nat_gw_b" {
-    allocation_id = aws_eip.nat_b.id
-    subnet_id     = aws_subnet.eks_pb_b.id
+resource "aws_nat_gateway" "this" {
+  for_each      = aws_subnet.public
+  allocation_id = aws_eip.nat[each.key].id
+  subnet_id     = aws_subnet.public[each.key].id
+  tags          = { Name = "${var.cluster_name}-nat-${each.key}" }
 
-    tags = {
-        Name = "nat-gw-b"
-    }
+  depends_on = [aws_internet_gateway.this]
 }
 
-# Route Tables
+# Route tables
 resource "aws_route_table" "public" {
-    vpc_id = aws_vpc.eks_vpc.id
-
-    route {
-        cidr_block = "0.0.0.0/0"
-        gateway_id = aws_internet_gateway.eks_igw.id
-    }
-
-    tags = {
-        Name = "public-rt"
-    }
+  vpc_id = aws_vpc.this.id
+  tags   = { Name = "${var.cluster_name}-public-rt" }
 }
 
-resource "aws_route_table" "private_a" {
-    vpc_id = aws_vpc.eks_vpc.id
-
-    route {
-        cidr_block     = "0.0.0.0/0"
-        nat_gateway_id = aws_nat_gateway.nat_gw_a.id
-    }
-
-    tags = {
-        Name = "private-rt-a"
-    }
+resource "aws_route" "public_inet" {
+  route_table_id         = aws_route_table.public.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.this.id
 }
 
-resource "aws_route_table" "private_b" {
-    vpc_id = aws_vpc.eks_vpc.id
-
-    route {
-        cidr_block     = "0.0.0.0/0"
-        nat_gateway_id = aws_nat_gateway.nat_gw_b.id
-    }
-
-    tags = {
-        Name = "private-rt-b"
-    }
+resource "aws_route_table_association" "public_assoc" {
+  for_each       = aws_subnet.public
+  subnet_id      = each.value.id
+  route_table_id = aws_route_table.public.id
 }
 
-# Route Table Associations
-resource "aws_route_table_association" "public_a" {
-    subnet_id      = aws_subnet.eks_pb_a.id
-    route_table_id = aws_route_table.public.id
+resource "aws_route_table" "private" {
+  for_each = aws_subnet.private
+  vpc_id   = aws_vpc.this.id
+  tags     = { Name = "${var.cluster_name}-private-rt-${each.key}" }
 }
 
-resource "aws_route_table_association" "public_b" {
-    subnet_id      = aws_subnet.eks_pb_b.id
-    route_table_id = aws_route_table.public.id
+resource "aws_route" "private_nat" {
+  for_each               = aws_nat_gateway.this
+  route_table_id         = aws_route_table.private[each.key].id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.this[each.key].id
 }
 
-resource "aws_route_table_association" "private_a" {
-    subnet_id      = aws_subnet.eks_pr_a.id
-    route_table_id = aws_route_table.private_a.id
+resource "aws_route_table_association" "private_assoc" {
+  for_each       = aws_subnet.private
+  subnet_id      = each.value.id
+  route_table_id = aws_route_table.private[each.key].id
 }
 
-resource "aws_route_table_association" "private_b" {
-    subnet_id      = aws_subnet.eks_pr_b.id
-    route_table_id = aws_route_table.private_b.id
+# EKS cluster SG (control plane)
+resource "aws_security_group" "eks_cluster" {
+  name        = "${var.cluster_name}-cluster-sg"
+  description = "EKS control plane"
+  vpc_id      = aws_vpc.this.id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${var.cluster_name}-cluster-sg" }
+}
+
+# Node SG
+resource "aws_security_group" "node" {
+  name        = "${var.cluster_name}-node-sg"
+  description = "Worker nodes"
+  vpc_id      = aws_vpc.this.id
+
+  ingress { # kubelet from control plane
+    description              = "Kubelet from control plane"
+    from_port                = 10250
+    to_port                  = 10250
+    protocol                 = "tcp"
+    security_groups          = [aws_security_group.eks_cluster.id]
+  }
+
+  ingress { # allow node-to-node
+    description = "Node to node"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    self        = true
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${var.cluster_name}-node-sg" }
+}
+
+# Rules for control plane <-> nodes on 443
+resource "aws_security_group_rule" "cp_ingress_from_nodes_443" {
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.eks_cluster.id
+  source_security_group_id = aws_security_group.node.id
+  description              = "API server inbound from nodes"
 }

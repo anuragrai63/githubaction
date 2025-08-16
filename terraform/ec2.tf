@@ -1,64 +1,109 @@
-resource "aws_instance" "my-eks-mgmt" {
-  ami                         = "ami-0de716d6197524dd9"
-  associate_public_ip_address = "true"
-  availability_zone           = "us-east-1b"
-  instance_type               = "t3.medium"
-  vpc_security_group_ids = [aws_security_group.eks_mgmt_sg.id]
-
-  root_block_device {
-    delete_on_termination = "true"
-    encrypted             = "false"
-    iops                  = "3000"
-    throughput            = "125"
-    volume_size           = "8"
-    volume_type           = "gp3"
-  }
-  subnet_id         = "${aws_subnet.eks_pb_b.id}"
-  depends_on = [ aws_eks_cluster.my-eks-demo ]
-  user_data = <<-EOF
-    #!/bin/bash
-    set -e
-
-    yum update -y
-    yum install -y curl unzip jq bash-completion
-
-    curl -LO https://s3.us-west-2.amazonaws.com/amazon-eks/1.32.3/2025-04-17/bin/linux/amd64/kubectl
-    chmod +x kubectl
-    mv kubectl /usr/local/bin/
-    kubectl version --client || echo "kubectl install failed"
-
-    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-    helm version || echo "helm install failed"
-
-    kubectl completion bash > /etc/bash_completion.d/kubectl
-    helm completion bash > /etc/bash_completion.d/helm
-  EOF
-  tags = {
-    Name = "my-eks-mgmt"
-  }
-
+resource "aws_iam_role" "bastion" {
+  name = "${var.cluster_name}-bastion-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action = "sts:AssumeRole",
+      Effect = "Allow",
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
 }
 
-resource "aws_security_group" "eks_mgmt_sg" {
-    name        = "eks_mgmt_sg"
-    description = "Security group for EKS management instance"
-    vpc_id      = aws_vpc.eks_vpc.id
+resource "aws_iam_role_policy_attachment" "bastion_ssm" {
+  role       = aws_iam_role.bastion.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+resource "aws_iam_role_policy_attachment" "bastion_eks" {
+  role       = aws_iam_role.bastion.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+resource "aws_iam_role_policy_attachment" "bastion_ecr_ro" {
+  role       = aws_iam_role.bastion.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
 
-    ingress {
-        from_port   = 22
-        to_port     = 22
-        protocol    = "tcp"
-        cidr_blocks = ["0.0.0.0/0"]
-    }
+resource "aws_iam_instance_profile" "bastion" {
+  name = "${var.cluster_name}-bastion-profile"
+  role = aws_iam_role.bastion.name
+}
 
-    egress {
-        from_port   = 0
-        to_port     = 0
-        protocol    = "-1"
-        cidr_blocks = ["0.0.0.0/0"]
-    }
+resource "aws_security_group" "bastion" {
+  name        = "${var.cluster_name}-bastion-sg"
+  description = "Bastion access"
+  vpc_id      = aws_vpc.this.id
 
-    tags = {
-        Name = "eks_mgmt_sg"
-    }
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.trusted_ssh_cidr]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${var.cluster_name}-bastion-sg" }
+}
+
+# Allow bastion to reach API server SG on 443 (if needed for private endpoint)
+resource "aws_security_group_rule" "bastion_to_cp_443" {
+  type                     = "egress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.bastion.id
+  source_security_group_id = aws_security_group.eks_cluster.id
+  depends_on               = [aws_security_group.eks_cluster]
+}
+
+# Find latest Amazon Linux 2 AMI
+data "aws_ami" "al2" {
+  owners      = ["137112412989"] # Amazon
+  most_recent = true
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-kernel-5.10-hvm-*-x86_64-gp2"]
+  }
+}
+
+locals {
+  bastion_user_data = <<-EOF
+    #!/bin/bash
+    set -e
+    yum update -y
+    yum install -y curl jq unzip bash-completion
+
+    # kubectl v1.32.3 (Linux amd64)
+    curl -o /usr/local/bin/kubectl https://s3.us-west-2.amazonaws.com/amazon-eks/1.32.3/2025-04-17/bin/linux/amd64/kubectl
+    chmod +x /usr/local/bin/kubectl
+
+    # Helm latest
+    curl -L https://get.helm.sh/helm-$(curl -s https://github.com/helm/helm/releases/latest | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+')-linux-amd64.tar.gz -o /tmp/helm.tgz
+    tar -xzf /tmp/helm.tgz -C /tmp
+    mv /tmp/linux-amd64/helm /usr/local/bin/helm
+    chmod +x /usr/local/bin/helm
+
+    # bash completion
+    echo 'source <(kubectl completion bash)' >> /etc/bashrc
+    echo 'source <(helm completion bash)' >> /etc/bashrc
+    echo 'complete -C /usr/local/bin/aws_completer aws' >> /etc/bashrc
+  EOF
+}
+
+resource "aws_instance" "bastion" {
+  ami                         = data.aws_ami.al2.id
+  instance_type               = "t3.micro"
+  subnet_id                   = aws_subnet.public[0].id
+  associate_public_ip_address = true
+  vpc_security_group_ids      = [aws_security_group.bastion.id]
+  iam_instance_profile        = aws_iam_instance_profile.bastion.name
+  user_data                   = local.bastion_user_data
+
+  tags = { Name = "eks-mgmt" }
 }
