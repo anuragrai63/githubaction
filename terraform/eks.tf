@@ -107,19 +107,12 @@ resource "aws_security_group" "eks_cluster_sg" {
 
   ingress {
     description = "Allow Kubernetes API from VPC"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = [aws_vpc.eks_vpc.cidr_block] 
   }
 
-  ingress {
-    description = "Allow node communication from VPC"
-    from_port   = 10250
-    to_port     = 10250
-    protocol    = "tcp"
-    cidr_blocks = [aws_vpc.eks_vpc.cidr_block]
-  }
 
   egress {
     description = "Allow all outbound"
