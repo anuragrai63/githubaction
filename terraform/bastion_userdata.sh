@@ -28,7 +28,7 @@ usermod -a -G docker ec2-user
 
 # Configure kubectl for the EKS cluster
 mkdir -p /home/ec2-user/.kube
-aws eks update-kubeconfig --region ${region} --name ${cluster_name} --kubeconfig /home/ec2-user/.kube/config
+aws eks update-kubeconfig --region us-east-1 --name my-eks-demo --kubeconfig /home/ec2-user/.kube/config
 chown -R ec2-user:ec2-user /home/ec2-user/.kube
 
 # Create helpful scripts for ec2-user
