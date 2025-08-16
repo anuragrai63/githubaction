@@ -106,7 +106,7 @@ resource "aws_eks_addon" "container_insights" {
 resource "aws_security_group" "eks_cluster_sg" {
   name        = "eks-cluster-sg"
   description = "EKS Cluster Security Group"
-  vpc_id      = [aws_vpc.eks_vpc.cidr_block]
+  vpc_id      = [aws_vpc.eks_vpc.id]
 
   ingress {
     description = "Allow Kubernetes API from VPC"
