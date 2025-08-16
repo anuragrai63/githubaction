@@ -45,81 +45,10 @@ resource "aws_eks_node_group" "this" {
     max_unavailable = 1
   }
 
-  depends_on = [aws_iam_openid_connect_provider.eks]
+  
 }
 
-# Trust policy helper
-locals {
-  oidc_provider_arn = aws_iam_openid_connect_provider.eks.arn
-  oidc_url          = replace(aws_iam_openid_connect_provider.eks.url, "https://", "")
-}
 
-# EBS CSI Driver
-resource "aws_iam_role" "ebs_csi" {
-  name = "${var.cluster_name}-ebs-csi-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Principal = { Federated = local.oidc_provider_arn },
-      Action   = "sts:AssumeRoleWithWebIdentity",
-      Condition = {
-        StringEquals = {
-          "${local.oidc_url}:sub" : "system:serviceaccount:kube-system:ebs-csi-controller-sa"
-        }
-      }
-    }]
-  })
-}
-resource "aws_iam_role_policy_attachment" "ebs_policy" {
-  role       = aws_iam_role.ebs_csi.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-}
-
-# EFS CSI Driver
-resource "aws_iam_role" "efs_csi" {
-  name = "${var.cluster_name}-efs-csi-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Principal = { Federated = local.oidc_provider_arn },
-      Action   = "sts:AssumeRoleWithWebIdentity",
-      Condition = {
-        StringEquals = {
-          "${local.oidc_url}:sub" : "system:serviceaccount:kube-system:efs-csi-controller-sa"
-        }
-      }
-    }]
-  })
-}
-resource "aws_iam_role_policy_attachment" "efs_policy" {
-  role       = aws_iam_role.efs_csi.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy"
-}
-
-# CloudWatch logs via aws-for-fluent-bit add-on
-resource "aws_iam_role" "fluentbit" {
-  name = "${var.cluster_name}-aws-for-fluent-bit-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Principal = { Federated = local.oidc_provider_arn },
-      Action   = "sts:AssumeRoleWithWebIdentity",
-      Condition = {
-        StringEquals = {
-          "${local.oidc_url}:sub" : "system:serviceaccount:aws-for-fluent-bit:aws-for-fluent-bit"
-        }
-      }
-    }]
-  })
-}
-# Permissions for logs and metrics
-resource "aws_iam_role_policy_attachment" "fluentbit_cw" {
-  role       = aws_iam_role.fluentbit.name
-  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
-}
 
 ###############################################
 # addons.tf (EKS Managed Add-ons)
@@ -153,44 +82,9 @@ resource "aws_eks_addon" "efs_csi" {
   service_account_role_arn = aws_iam_role.efs_csi.arn
 }
 
-resource "aws_eks_addon" "aws_for_fluent_bit" {
-  cluster_name             = aws_eks_cluster.this.name
-  addon_name               = "aws-for-fluent-bit"
-  service_account_role_arn = aws_iam_role.fluentbit.arn
-}
 
-###############################################
-# metrics-server via Helm (not an EKS managed add-on)
-###############################################
-provider "kubernetes" {
-  host                   = data.aws_eks_cluster.this.endpoint
-  cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
-  token                  = data.aws_eks_cluster_auth.this.token
-}
 
-provider "helm" {
-  kubernetes {
-    host                   = data.aws_eks_cluster.this.endpoint
-    cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
-    token                  = data.aws_eks_cluster_auth.this.token
-  }
-}
 
-resource "kubernetes_namespace" "metrics_server" {
-  metadata { name = "kube-system" }
-}
 
-resource "helm_release" "metrics_server" {
-  name       = "metrics-server"
-  repository = "https://kubernetes-sigs.github.io/metrics-server/"
-  chart      = "metrics-server"
-  namespace  = "kube-system"
-  version    = "3.12.2"
-  values     = [yamlencode({
-    args = [
-      "--kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP",
-      "--kubelet-insecure-tls"
-    ]
-  })]
-  depends_on = [aws_eks_node_group.this]
-}
+
+
