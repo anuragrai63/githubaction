@@ -21,9 +21,7 @@ resource "aws_eks_cluster" "my-eks-demo" {
     subnet_ids              = ["${aws_subnet.eks_pr_a.id}", "${aws_subnet.eks_pr_b.id}"]
   }
 
-  lifecycle {
-    ignore_changes = all
-  }
+  depends_on = [ aws_iam_role.eks_cluster_role]
 
 }
 
