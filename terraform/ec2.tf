@@ -15,7 +15,24 @@ resource "aws_instance" "my-eks-mgmt" {
   }
   subnet_id         = "${aws_subnet.eks_pb_b.id}"
   depends_on = [ aws_eks_cluster.my-eks-demo ]
+  user_data = <<-EOF
+    #!/bin/bash
+    set -e
 
+    yum update -y
+    yum install -y curl unzip jq bash-completion
+
+    curl -LO https://s3.us-west-2.amazonaws.com/amazon-eks/1.32.3/2025-04-17/bin/linux/amd64/kubectl
+    chmod +x kubectl
+    mv kubectl /usr/local/bin/
+    kubectl version --client || echo "kubectl install failed"
+
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    helm version || echo "helm install failed"
+
+    kubectl completion bash > /etc/bash_completion.d/kubectl
+    helm completion bash > /etc/bash_completion.d/helm
+  EOF
   tags = {
     Name = "my-eks-mgmt"
   }

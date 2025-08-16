@@ -65,40 +65,86 @@ resource "aws_eks_node_group" "my-eks-ng" {
   }
 
   version = "1.32"
+  timeouts {
+    create = "15m"
+    delete = "15m"
+    update = "15m"
+  }
 }
 
 resource "aws_eks_addon" "vpc_cni" {
   cluster_name = aws_eks_cluster.my-eks-demo.name
   addon_name   = "vpc-cni"
   addon_version = "v1.15.1-eksbuild.1"
+  depends_on = [ aws_eks_node_group.my-eks-ng ]
 }
 
 resource "aws_eks_addon" "kube_proxy" {
   cluster_name = aws_eks_cluster.my-eks-demo.name
   addon_name   = "kube-proxy"
   addon_version      = "v1.32.1-eksbuild.1"
+  depends_on = [ aws_eks_node_group.my-eks-ng ]
 }
 
 resource "aws_eks_addon" "coredns" {
   cluster_name = aws_eks_cluster.my-eks-demo.name
   addon_name   = "coredns"
   addon_version      = "v1.11.1-eksbuild.4"
+  depends_on = [ aws_eks_node_group.my-eks-ng ]
 }
 
 resource "aws_eks_addon" "ebs_csi" {
   cluster_name = aws_eks_cluster.my-eks-demo.name
   addon_name   = "aws-ebs-csi-driver"
   addon_version      = "v1.26.1-eksbuild.1"
+  depends_on = [ aws_eks_node_group.my-eks-ng ]
 }
 
 resource "aws_eks_addon" "efs_csi" {
   cluster_name = aws_eks_cluster.my-eks-demo.name
   addon_name   = "aws-efs-csi-driver"
   addon_version      = "v1.7.1-eksbuild.1"
+  depends_on = [ aws_eks_node_group.my-eks-ng ]
 }
 
 resource "aws_eks_addon" "container_insights" {
   cluster_name = aws_eks_cluster.my-eks-demo.name
   addon_name   = "amazon-cloudwatch-observability"
   addon_version      = "v1.1.1-eksbuild.1"
+  depends_on = [ aws_eks_node_group.my-eks-ng ]
+}
+
+
+resource "aws_security_group" "eks_cluster_sg" {
+  name        = "eks-cluster-sg"
+  description = "EKS Cluster Security Group"
+  vpc_id      = [aws_vpc.eks_vpc.cidr_block]
+
+  ingress {
+    description = "Allow Kubernetes API from VPC"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.eks_vpc.cidr_block] 
+  }
+
+  ingress {
+    description = "Allow node communication from VPC"
+    from_port   = 10250
+    to_port     = 10250
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.eks_vpc.cidr_block]
+  }
+
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "eks-cluster-sg"
+  }
 }
