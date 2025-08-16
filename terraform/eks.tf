@@ -12,7 +12,7 @@ resource "aws_eks_cluster" "my-eks-demo" {
     }
 
     ip_family         = "ipv4"
-    service_ipv4_cidr = aws_vpc.eks_vpc.cidr_block
+    service_ipv4_cidr = "10.100.0.0/16"
   }
 
   name     = "my-eks-demo"
